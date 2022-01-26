@@ -6,14 +6,17 @@
 //
 
 import UIKit
-import CoreData
 
 class TaskListViewController: UITableViewController {
-    private let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
     
     private let cellID = "task"
     private var taskList: [Task] = []
-
+    
+    private enum Style {
+        case new
+        case edit
+    }
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .white
@@ -27,7 +30,7 @@ class TaskListViewController: UITableViewController {
         fetchData()
         tableView.reloadData()
     }
- 
+    
     private func setupNavigationBar() {
         title = "Task List"
         navigationController?.navigationBar.prefersLargeTitles = true
@@ -58,26 +61,36 @@ class TaskListViewController: UITableViewController {
     }
     
     @objc private func addNewTask() {
-        showAlert(with: "New Task", and: "What do you want to do?")
+        showMessage(with: "New Task", and: "What do you want to do?", do: .new)
     }
     
     private func fetchData() {
-        let fetchRequest = Task.fetchRequest()
-        
-        do {
-            taskList = try context.fetch(fetchRequest)
-        } catch {
-           print("Faild to fetch data", error)
+        StorageManager.shared.fetchData { tasks in
+            self.taskList = tasks
         }
     }
     
-    private func showAlert(with title: String, and message: String) {
+    private func showMessage(with title: String, and message: String, do action: Style, at index: Int = -1) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         let saveAction = UIAlertAction(title: "Save", style: .default) { _ in
             guard let task = alert.textFields?.first?.text, !task.isEmpty else { return }
-            self.save(task)
+            
+            switch action {
+            case .new:
+                StorageManager.shared.save(name: task)
+                self.fetchData()
+                self.tableView.reloadData()
+            case .edit:
+                if index >= 0 {
+                    StorageManager.shared.edit(in: index, new: task) { task in
+                        guard let newValueTask = task.name else {return}
+                        task.name = newValueTask
+                    }
+                    self.fetchData()
+                    self.tableView.reloadData()
+                }
+            }
         }
-        
         let cancelAction = UIAlertAction(title: "Cancel", style: .destructive)
         
         alert.addAction(saveAction)
@@ -87,26 +100,32 @@ class TaskListViewController: UITableViewController {
         }
         present(alert, animated: true)
     }
-    private func save(_ taskName: String) {
-        
-        let task = Task(context: context)
-        task.name = taskName
-        taskList.append(task)
-        
-        let cellIndex = IndexPath(row: taskList.count - 1, section: 0)
-        tableView.insertRows(at: [cellIndex], with: .automatic)
-        
-        do {
-            try context.save()
-        } catch let error {
-            print(error)
-        }
-    }
 }
 
 extension TaskListViewController {
+    
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         taskList.count
+    }
+    
+    override func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        
+        let DeleteAction = UIContextualAction(style: .normal, title:  "Delete", handler: { (ac:UIContextualAction, view:UIView, success:(Bool) -> Void) in
+            StorageManager.shared.delete(in: indexPath.row) { task in
+                self.taskList = task
+            }
+            tableView.deleteRows(at: [indexPath], with: .automatic)
+            success(true)
+        })
+        DeleteAction.backgroundColor = .red
+        
+        let EditAction = UIContextualAction(style: .normal, title:  "Edit", handler: { (ac:UIContextualAction, view:UIView, success:(Bool) -> Void) in
+            self.showMessage(with: "Edit task", and: "What's new name for?", do: .edit, at: indexPath.row)
+            success(true)
+        })
+        EditAction.backgroundColor = .orange
+        
+        return UISwipeActionsConfiguration(actions: [DeleteAction, EditAction])
     }
     
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
